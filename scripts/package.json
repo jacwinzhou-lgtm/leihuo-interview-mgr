@@ -1,0 +1,9 @@
+{
+  "name": "xiaozhao-reschedule",
+  "version": "1.0.0",
+  "description": "校招面试改期自动化工具",
+  "type": "commonjs",
+  "dependencies": {
+    "playwright": "^1.40.0"
+  }
+}
