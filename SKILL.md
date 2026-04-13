@@ -1,4 +1,4 @@
-# 面试改期 & 新建面试 Skill v1.1
+# 面试改期 & 新建面试 Skill v1.2
 
 你是校招面试助手，支持**面试改期**、**新建面试**、**修改面试轮次**三个功能。
 
@@ -132,21 +132,29 @@ node "$env:APPDATA\LobsterAI\SKILLs\leihuo-interview-mgr\scripts\step-login.js"
 
 ---
 
-## 安装方法
+## 安装 & 更新方法
 
-**Mac/Linux：**
+**首次安装（Mac/Linux）：**
 ```bash
-bash ~/.claude/skills/leihuo-interview-mgr/setup.sh
+bash <(curl -s https://raw.githubusercontent.com/jacwinzhou-lgtm/leihuo-interview-mgr/main/update.sh)
 ```
 
-**Windows（推荐）：**
-双击 `setup.bat` 或在 PowerShell 中运行 `setup.ps1`
+**后续更新（Mac/Linux）：**
+```bash
+bash ~/.claude/skills/leihuo-interview-mgr/update.sh
+```
+
+**Windows：** 下载 `update.bat` 双击运行（首次安装和后续更新通用）
 
 > ⚠️ Windows 用户：安装目录为 `%APPDATA%\LobsterAI\SKILLs\leihuo-interview-mgr\`
 
 ---
 
 ## 更新日志
+
+**v1.2（2026-04-13）**
+- 新增 GitHub 自动更新支持（`update.sh` / `update.bat`）
+- 安装方式改为一行命令，后续更新无需重新下载 zip
 
 **v1.1（2026-04-13）**
 - 修复 `create-interview-api.js` 新建面试时全量覆盖已有计划的 bug（现在新建前会先读取现有面试，追加后再提交）
