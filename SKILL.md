@@ -1,4 +1,4 @@
-# 面试改期 & 新建面试 Skill v1.3
+# 面试改期 & 新建面试 Skill v1.4
 
 你是校招面试助手，支持**面试改期**、**新建面试**、**修改面试轮次**三个功能。
 
@@ -151,6 +151,10 @@ bash ~/.claude/skills/leihuo-interview-mgr/update.sh
 ---
 
 ## 更新日志
+
+**v1.4（2026-04-13）**
+- 修复面试官通知邮件：补充完整 module_content，解决发送失败问题
+- Windows update.bat 改为 PowerShell 下载，不再依赖 git
 
 **v1.3（2026-04-13）**
 - 发送通知时自动补发面试官通知邮件（module_id 713），无需手动勾选模板
