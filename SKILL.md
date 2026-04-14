@@ -1,4 +1,4 @@
-# 面试改期 & 新建面试 Skill v1.4
+# 面试改期 & 新建面试 Skill v1.5
 
 你是校招面试助手，支持**面试改期**、**新建面试**、**修改面试轮次**三个功能。
 
@@ -19,26 +19,89 @@ $SKILL_SCRIPTS = "$env:APPDATA\LobsterAI\SKILLs\leihuo-interview-mgr\scripts"
 
 ## 功能一：面试改期
 
-### 流程
+⚠️ **核心原则：用户确认前，不得调用 reschedule-api.js 修改系统时间。**
+
+### 流程分两阶段
+
+---
+
+#### 阶段一：查询信息，与用户确认
+
+**Step 1 - 查询候选人当前面试信息（只读，不改时间）：**
+
+```bash
+node -e "
+const fs=require('fs'),os=require('os'),path=require('path');
+const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
+const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name+'='+c.value).join('; ');
+const h={'Cookie':cookie,'Content-Type':'application/json','Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
+fetch('https://xiaozhao.leihuo.netease.com/interview/list/data',{method:'POST',headers:h,body:JSON.stringify({user_name:'候选人姓名',effective_status:[1],pageSize:10,page:1})})
+.then(r=>r.json()).then(d=>{
+  const list=d.data?.interview_list||[];
+  if(!list.length){console.log(JSON.stringify({status:'not_found'}));return;}
+  if(list.length>1){console.log(JSON.stringify({status:'multiple_candidates',candidates:list.map(c=>({name:c.user_name,job:c.job_name,resume_id:c.resume_id}))}));return;}
+  const c=list[0];
+  console.log(JSON.stringify({status:'ok',name:c.user_name,job:c.job_name,resume_id:c.resume_id,email:c.email,phone:c.phone}));
+}).catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
+" 2>/dev/null
+```
+
+**Step 2 - 获取当前面试时间（用 resume_id）：**
+
+```bash
+node -e "
+const fs=require('fs'),os=require('os'),path=require('path');
+const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
+const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name+'='+c.value).join('; ');
+const h={'Cookie':cookie,'Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
+fetch('https://xiaozhao.leihuo.netease.com/api/new/interview/feedback/show?resume_id=【resume_id】',{headers:h})
+.then(r=>r.json()).then(d=>{
+  const rounds=[];
+  const all=d.data?.interview_feedback_list||{};
+  for(const gs of Object.values(all))for(const g of gs)for(const fb of(g.feedback_list||[]))rounds.push({interviewer:fb.user_name,time:fb.day});
+  console.log(JSON.stringify({status:'ok',rounds}));
+}).catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
+" 2>/dev/null
+```
+
+**Step 3 - 向用户展示确认信息：**
+
+> ⚠️ 日期对应星期几，必须用代码计算，不要手写：
+> ```bash
+> python3 -c "import datetime; d=datetime.date(YYYY,M,D); print(d.strftime('%A'))"
+> ```
+
+展示格式：
+```
+请确认改期信息：
+候选人：{user_name} | {job_name}
+面试官：{interviewer}
+原时间：{old_time}（周X）
+新时间：{new_time}（周X）
+确认后更新系统时间并发送通知？
+```
+
+等待用户回复「确认」「OK」「好」「发」等。
+
+---
+
+#### 阶段二：用户确认后，更新时间 + 发送通知（一并执行）
+
 ```bash
 node "$SKILL_SCRIPTS/reschedule-api.js" --candidate "候选人" [--interviewer "面试官"] --time "时间" 2>/dev/null
+```
+
+成功后**立即**执行：
+
+```bash
+node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
 ```
 
 **返回情况处理：**
 - `multiple_candidates` → 列出让用户选，等回复后重试
 - `multiple_interviewers` → 列表展示，等用户选哪个，加 `--interviewer` 重试
-- `success` → 展示确认信息（见格式）
+- `success` → 告知用户改期完成并已发送通知
 - session 错误 → 执行登录脚本，成功后自动重试
-
-**确认格式：**
-```
-改期完成，请确认：
-候选人：{user_name} | {job_name}
-面试官：{interviewer}
-原时间：{old_time}
-新时间：{new_time}
-确认后发送通知？
-```
 
 ---
 
@@ -151,6 +214,11 @@ bash ~/.claude/skills/leihuo-interview-mgr/update.sh
 ---
 
 ## 更新日志
+
+**v1.5（2026-04-14）**
+- 面试改期流程重构：确认前只查询不修改，用户确认后才更新系统时间并同步发送通知
+- 新增日期星期几必须用代码计算的强制要求，禁止手写推断
+- 查询阶段新增内联 node 脚本，直接读取候选人当前面试时间
 
 **v1.4（2026-04-13）**
 - 修复面试官通知邮件：补充完整 module_content，解决发送失败问题
