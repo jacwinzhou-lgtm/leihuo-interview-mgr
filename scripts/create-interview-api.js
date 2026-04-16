@@ -1,7 +1,8 @@
 /**
  * 新建面试安排 - 纯API版本
- * 用法：node create-interview-api.js --candidate "薛巍" --interviewer "周家杰" --time "明天下午2点" [--round "1"] [--type "video"]
+ * 用法：node create-interview-api.js --candidate "薛巍" --interviewer "周家杰,张青" --time "明天下午2点" [--round "1"] [--type "video"]
  *
+ * --interviewer: 支持多个面试官，用逗号或顿号分隔，如 "周家杰,张青" 或 "周家杰、张青"
  * --round: 面试轮次，1=业务初面(默认), 2=业务终面, 3=HR面
  * --type: 面试形式，video=牛客网视频(默认), offline=线下
  */
@@ -119,7 +120,7 @@ async function apiRequest(cookieStr, method, path, body = null) {
   const typeKey = args.type || 'video';
 
   if (!candidateName || !interviewerName || !timeText) {
-    console.error('用法: node create-interview-api.js --candidate "薛巍" --interviewer "周家杰" --time "明天下午2点" [--round 1] [--type video]');
+    console.error('用法: node create-interview-api.js --candidate "薛巍" --interviewer "周家杰,张青" --time "明天下午2点" [--round 1] [--type video]');
     process.exit(1);
   }
 
@@ -130,7 +131,10 @@ async function apiRequest(cookieStr, method, path, body = null) {
   const roundInfo = ROUND_MAP[round] || ROUND_MAP['1'];
   const typeCode = TYPE_MAP[typeKey] || '3';
 
-  console.error(`\n新建面试：${candidateName} | ${interviewerName} | ${timeStr} | ${roundInfo.name}\n`);
+  // 支持多个面试官（逗号或顿号分隔）
+  const interviewerNames = interviewerName.split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+
+  console.error(`\n新建面试：${candidateName} | ${interviewerNames.join('、')} | ${timeStr} | ${roundInfo.name}\n`);
 
   const cookieStr = getCookieString();
   if (!cookieStr) { console.error('未找到session'); process.exit(1); }
@@ -160,29 +164,30 @@ async function apiRequest(cookieStr, method, path, body = null) {
   const resumeId = candidate.resume_id;
   console.error(`✅ 候选人：${candidate.user_name}（${candidate.job_name}）`);
 
-  // Step 2: 搜索面试官 user_id
+  // Step 2: 搜索所有面试官 user_id
   console.error('[2/3] 搜索面试官...');
-  const userResult = await apiRequest(cookieStr, 'GET', `/permission/user/search?key_word=${encodeURIComponent(interviewerName)}`);
-
-  if (!userResult.data?.length) {
-    console.log(JSON.stringify({ status: 'interviewer_not_found', message: `未找到面试官「${interviewerName}」` }));
-    process.exit(0);
+  const resolvedInterviewers = [];
+  for (const name of interviewerNames) {
+    const userResult = await apiRequest(cookieStr, 'GET', `/permission/user/search?key_word=${encodeURIComponent(name)}`);
+    if (!userResult.data?.length) {
+      console.log(JSON.stringify({ status: 'interviewer_not_found', message: `未找到面试官「${name}」` }));
+      process.exit(0);
+    }
+    const users = userResult.data;
+    const exactMatches = users.filter(u => u.user_name === name);
+    if (exactMatches.length > 1 || (!exactMatches.length && users.length > 1)) {
+      const candidates = exactMatches.length > 1 ? exactMatches : users;
+      console.log(JSON.stringify({
+        status: 'multiple_interviewers',
+        message: `搜索到多个「${name}」，请通过邮箱确认`,
+        users: candidates.map(u => ({ user_id: u.user_id, name: u.user_name, email: u.user_email }))
+      }));
+      process.exit(0);
+    }
+    const targetUser = exactMatches[0] || users[0];
+    resolvedInterviewers.push(targetUser);
+    console.error(`✅ 面试官：${targetUser.user_name}（user_id=${targetUser.user_id}）`);
   }
-
-  const users = userResult.data;
-  const exactMatch = users.find(u => u.user_name === interviewerName);
-  const targetUser = exactMatch || users[0];
-
-  if (!exactMatch && users.length > 1) {
-    console.log(JSON.stringify({
-      status: 'multiple_interviewers',
-      message: `搜索到多个「${interviewerName}」，请确认`,
-      users: users.map(u => ({ user_id: u.user_id, name: u.user_name, email: u.user_email }))
-    }));
-    process.exit(0);
-  }
-
-  console.error(`✅ 面试官：${targetUser.user_name}（user_id=${targetUser.user_id}）`);
 
   // Step 3: 获取现有面试计划，避免全量覆盖
   console.error('[3/4] 获取现有面试计划...');
@@ -206,7 +211,7 @@ async function apiRequest(cookieStr, method, path, body = null) {
   }
   console.error(`已有 ${existingPlans.length} 场面试，追加新场次后提交`);
 
-  // Step 4: 创建面试（追加到现有计划）
+  // Step 4: 创建面试（追加到现有计划，多面试官合并进同一条记录的 user_list）
   console.error('[4/4] 创建面试安排...');
   const interview_plan_array = [
     ...existingPlans,
@@ -217,7 +222,7 @@ async function apiRequest(cookieStr, method, path, body = null) {
       category: roundInfo.category,
       nowcoder_second_camera: '1',
       interview_direction_id: 1,
-      user_list: [{ user_id: targetUser.user_id, interview_plan_id: '' }]
+      user_list: resolvedInterviewers.map(u => ({ user_id: u.user_id, interview_plan_id: '' }))
     }
   ];
   const createResult = await apiRequest(cookieStr, 'POST', '/setting/interviewplan/update', {
@@ -231,7 +236,7 @@ async function apiRequest(cookieStr, method, path, body = null) {
       message: `✅ 面试创建成功！`,
       candidate: candidate.user_name,
       job: candidate.job_name,
-      interviewer: targetUser.user_name,
+      interviewer: resolvedInterviewers.map(u => u.user_name).join('、'),
       time: timeStr,
       round: roundInfo.name,
       resume_id: resumeId
