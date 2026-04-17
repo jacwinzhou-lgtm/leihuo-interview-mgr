@@ -179,8 +179,13 @@ async function apiRequest(cookieStr, method, path, body = null) {
       const candidates = exactMatches.length > 1 ? exactMatches : users;
       console.log(JSON.stringify({
         status: 'multiple_interviewers',
-        message: `搜索到多个「${name}」，请通过邮箱确认`,
-        users: candidates.map(u => ({ user_id: u.user_id, name: u.user_name, email: u.user_email }))
+        message: `搜索到多个「${name}」，请确认是哪位`,
+        users: candidates.map(u => ({
+          user_id: u.user_id,
+          name: u.user_name,
+          email: u.user_email,
+          dept: [u.dept1_name, u.dept2_name, u.dept3_name, u.dept4_name].filter(Boolean).join(' / ')
+        }))
       }));
       process.exit(0);
     }

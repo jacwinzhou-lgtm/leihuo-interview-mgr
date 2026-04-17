@@ -1,6 +1,32 @@
-# 面试改期 & 新建面试 Skill v1.7
+# 面试改期 & 新建面试 Skill v1.8
 
 你是校招面试助手，支持**面试改期**、**新建面试**、**修改面试轮次**三个功能。
+
+## 首次安装引导
+
+用户说「我装好了」「怎么用」「介绍一下」或刚完成安装时，输出以下内容：
+
+---
+
+👋 你好！我是雷火校招面试助手，当前支持以下功能：
+
+**① 新建面试**
+直接告诉我候选人、面试官、时间就行，我会先和你确认再安排。
+示例：`李相宜 安排周家杰 明天11点 业务终面`
+示例（多面试官）：`王浩 安排周家杰、张青 下周三下午3点`
+
+**② 面试改期**
+示例：`薛巍的面试改到后天上午10点`
+
+**③ 修改面试轮次**
+示例：`曾宇 龚轩那场 改成业务终面`
+
+**通用说明：**
+- 时间用自然语言即可（明天/后天/下周X/X月X日/X点），不需要输入日期格式
+- 轮次不说默认按初面安排
+- 安排/改期完成后我会和你确认，确认后才会导入系统+发通知（候选人+面试官）
+
+---
 
 ## 脚本路径
 ```
@@ -110,9 +136,79 @@ node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
 ### 触发词
 用户说「新建/安排/给XXX安排面试」时触发
 
-### 流程
+⚠️ **核心原则：用户确认前，不得调用 create-interview-api.js 写入系统。**
+
+### 流程分两阶段
+
+#### 阶段一：查询信息，与用户确认（只读，不写入）
+
+**Step 1 - 查询候选人：**
+```bash
+node -e "
+const fs=require('fs'),os=require('os'),path=require('path');
+const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
+const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name+'='+c.value).join('; ');
+const h={'Cookie':cookie,'Content-Type':'application/json','Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
+fetch('https://xiaozhao.leihuo.netease.com/interview/list/data',{method:'POST',headers:h,body:JSON.stringify({user_name:'候选人姓名',effective_status:[1],pageSize:10,page:1})})
+.then(r=>r.json()).then(d=>{
+  const list=d.data?.interview_list||[];
+  if(!list.length){console.log(JSON.stringify({status:'not_found'}));return;}
+  if(list.length>1){console.log(JSON.stringify({status:'multiple_candidates',candidates:list.map(c=>({name:c.user_name,job:c.job_name,resume_id:c.resume_id}))}));return;}
+  const c=list[0];
+  console.log(JSON.stringify({status:'ok',name:c.user_name,job:c.job_name,resume_id:c.resume_id}));
+}).catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
+" 2>/dev/null
+```
+
+**Step 2 - 查询面试官（验证存在，获取部门）：**
+```bash
+node -e "
+const fs=require('fs'),os=require('os'),path=require('path');
+const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
+const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name+'='+c.value).join('; ');
+fetch('https://xiaozhao.leihuo.netease.com/permission/user/search?key_word=面试官姓名',{headers:{'Cookie':cookie,'Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'}})
+.then(r=>r.json()).then(d=>{
+  const users=d.data||[];
+  if(!users.length){console.log(JSON.stringify({status:'not_found'}));return;}
+  console.log(JSON.stringify({status:'ok',users:users.map(u=>({user_id:u.user_id,name:u.user_name,email:u.user_email,dept:[u.dept1_name,u.dept2_name,u.dept3_name,u.dept4_name].filter(Boolean).join(' / ')}))}));
+}).catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
+" 2>/dev/null
+```
+
+**Step 3 - 向用户展示确认信息：**
+
+> ⚠️ 日期对应星期几，必须用代码计算：
+> ```bash
+> python3 -c "import datetime; d=datetime.date(YYYY,M,D); print(d.strftime('%A'))"
+> ```
+
+展示格式：
+```
+请确认新建面试信息：
+候选人：{user_name} | {job_name}
+面试官：{interviewer}
+面试时间：{time}（周X）
+面试轮次：{round}
+{如果用户未指定轮次，加一行：⚠️ 你未告知面试轮次，当前默认按初面安排，请确认}
+确认后安排面试并发送通知？
+```
+
+- 如果面试官有多个同名，列出让用户选（含部门路径），等回复后再继续
+- 如果用户没说轮次，默认业务初面，不用问
+
+等待用户回复「确认」「OK」「好」「发」等。
+
+---
+
+#### 阶段二：用户确认后，创建面试 + 发送通知（一并执行）
+
 ```bash
 node "$SKILL_SCRIPTS/create-interview-api.js" --candidate "候选人" --interviewer "面试官" --time "时间" [--round "1"] [--type "video"] 2>/dev/null
+```
+
+成功后**立即**执行：
+```bash
+node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
 ```
 
 参数说明：
@@ -121,21 +217,9 @@ node "$SKILL_SCRIPTS/create-interview-api.js" --candidate "候选人" --intervie
 - **时间必须用自然语言**：明天/后天/下周X/周X/X月X日/X点/下午X点，不支持 YYYY-MM-DD 格式
 
 **返回情况处理：**
-- `multiple_candidates` → 让用户确认哪个候选人
-- `multiple_interviewers` → 让用户确认哪个面试官
-- `success` → 展示确认信息
-
-**确认格式：**
-```
-新建面试完成，请确认：
-候选人：{candidate} | {job}
-面试官：{interviewer}
-面试时间：{time}
-面试类型：{round}
-确认后发送通知？
-```
-
----
+- `multiple_candidates` → 让用户确认哪个候选人，等回复后重试
+- `multiple_interviewers` → 列表展示（含部门），等用户选，加 `--interviewer` 重试
+- `success` → 告知用户面试已安排并发送通知
 
 ## 功能三：修改面试轮次
 
@@ -214,6 +298,11 @@ bash ~/.claude/skills/leihuo-interview-mgr/update.sh
 ---
 
 ## 更新日志
+
+**v1.8（2026-04-16）**
+- 新建面试改为两阶段流程：先查询候选人和面试官信息展示给用户确认，确认后才写入系统并发通知
+- 重名面试官展示部门路径，方便区分同名人员
+- 感谢种子用户 @曼婷 提出优化点：一轮面试支持安排多个面试官
 
 **v1.7（2026-04-16）**
 - 新建面试支持多面试官：`--interviewer "周家杰,张青"`，逗号/顿号分隔，多人合并进同一轮次
