@@ -1,4 +1,4 @@
-# 面试改期 & 新建面试 Skill v1.8
+# 面试改期 & 新建面试 Skill v1.9
 
 你是校招面试助手，支持**面试改期**、**新建面试**、**修改面试轮次**三个功能。
 
@@ -53,49 +53,35 @@ $SKILL_SCRIPTS = "$env:APPDATA\LobsterAI\SKILLs\leihuo-interview-mgr\scripts"
 
 #### 阶段一：查询信息，与用户确认
 
-**Step 1 - 查询候选人当前面试信息（只读，不改时间）：**
+**阶段一查询（单次执行，候选人+当前面试时间一并返回）：**
 
 ```bash
 node -e "
 const fs=require('fs'),os=require('os'),path=require('path');
+const WD=['周日','周一','周二','周三','周四','周五','周六'];
 const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
 const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name+'='+c.value).join('; ');
 const h={'Cookie':cookie,'Content-Type':'application/json','Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
-fetch('https://xiaozhao.leihuo.netease.com/interview/list/data',{method:'POST',headers:h,body:JSON.stringify({user_name:'候选人姓名',effective_status:[1],pageSize:10,page:1})})
-.then(r=>r.json()).then(d=>{
+const BASE='https://xiaozhao.leihuo.netease.com';
+(async()=>{
+  const d=await(await fetch(BASE+'/interview/list/data',{method:'POST',headers:h,body:JSON.stringify({user_name:'候选人姓名',effective_status:[1],pageSize:10,page:1})})).json();
   const list=d.data?.interview_list||[];
   if(!list.length){console.log(JSON.stringify({status:'not_found'}));return;}
   if(list.length>1){console.log(JSON.stringify({status:'multiple_candidates',candidates:list.map(c=>({name:c.user_name,job:c.job_name,resume_id:c.resume_id}))}));return;}
   const c=list[0];
-  console.log(JSON.stringify({status:'ok',name:c.user_name,job:c.job_name,resume_id:c.resume_id,email:c.email,phone:c.phone}));
-}).catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
-" 2>/dev/null
-```
-
-**Step 2 - 获取当前面试时间（用 resume_id）：**
-
-```bash
-node -e "
-const fs=require('fs'),os=require('os'),path=require('path');
-const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
-const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name+'='+c.value).join('; ');
-const h={'Cookie':cookie,'Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
-fetch('https://xiaozhao.leihuo.netease.com/api/new/interview/feedback/show?resume_id=【resume_id】',{headers:h})
-.then(r=>r.json()).then(d=>{
+  const fd=await(await fetch(BASE+'/api/new/interview/feedback/show?resume_id='+c.resume_id,{headers:{...h,'Content-Type':undefined}})).json();
   const rounds=[];
-  const all=d.data?.interview_feedback_list||{};
-  for(const gs of Object.values(all))for(const g of gs)for(const fb of(g.feedback_list||[]))rounds.push({interviewer:fb.user_name,time:fb.day});
-  console.log(JSON.stringify({status:'ok',rounds}));
-}).catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
+  for(const gs of Object.values(fd.data?.interview_feedback_list||{}))for(const g of gs)for(const fb of(g.feedback_list||[])){
+    const dt=new Date(g.day);rounds.push({interviewer:fb.user_name,time:g.day,weekday:WD[dt.getDay()]});
+  }
+  console.log(JSON.stringify({status:'ok',name:c.user_name,job:c.job_name,resume_id:c.resume_id,rounds}));
+})().catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
 " 2>/dev/null
 ```
+
+新时间的星期几直接用 JS 算：`new Date('YYYY-MM-DD').getDay()` 映射到 `['周日','周一','周二','周三','周四','周五','周六']`，无需再起 python3 进程。
 
 **Step 3 - 向用户展示确认信息：**
-
-> ⚠️ 日期对应星期几，必须用代码计算，不要手写：
-> ```bash
-> python3 -c "import datetime; d=datetime.date(YYYY,M,D); print(d.strftime('%A'))"
-> ```
 
 展示格式：
 ```
@@ -142,36 +128,46 @@ node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
 
 #### 阶段一：查询信息，与用户确认（只读，不写入）
 
-**Step 1 - 查询候选人：**
+**阶段一查询（单次执行，候选人+面试官并行查询）：**
+
 ```bash
 node -e "
 const fs=require('fs'),os=require('os'),path=require('path');
+const WD=['周日','周一','周二','周三','周四','周五','周六'];
 const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
 const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name+'='+c.value).join('; ');
-const h={'Cookie':cookie,'Content-Type':'application/json','Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
-fetch('https://xiaozhao.leihuo.netease.com/interview/list/data',{method:'POST',headers:h,body:JSON.stringify({user_name:'候选人姓名',effective_status:[1],pageSize:10,page:1})})
-.then(r=>r.json()).then(d=>{
-  const list=d.data?.interview_list||[];
+const hj={'Cookie':cookie,'Content-Type':'application/json','Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
+const hg={'Cookie':cookie,'Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
+const BASE='https://xiaozhao.leihuo.netease.com';
+const interviewerNames='面试官姓名'.split(/[,，、]/).map(s=>s.trim()).filter(Boolean);
+(async()=>{
+  const [cd, ...irs]=await Promise.all([
+    fetch(BASE+'/interview/list/data',{method:'POST',headers:hj,body:JSON.stringify({user_name:'候选人姓名',effective_status:[1],pageSize:10,page:1})}).then(r=>r.json()),
+    ...interviewerNames.map(n=>fetch(BASE+'/permission/user/search?key_word='+encodeURIComponent(n),{headers:hg}).then(r=>r.json()))
+  ]);
+  const list=cd.data?.interview_list||[];
   if(!list.length){console.log(JSON.stringify({status:'not_found'}));return;}
   if(list.length>1){console.log(JSON.stringify({status:'multiple_candidates',candidates:list.map(c=>({name:c.user_name,job:c.job_name,resume_id:c.resume_id}))}));return;}
-  const c=list[0];
-  console.log(JSON.stringify({status:'ok',name:c.user_name,job:c.job_name,resume_id:c.resume_id}));
-}).catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
+  const cand=list[0];
+  const interviewers=[];
+  for(let i=0;i<interviewerNames.length;i++){
+    const users=irs[i].data||[];
+    const name=interviewerNames[i];
+    if(!users.length){console.log(JSON.stringify({status:'interviewer_not_found',message:'未找到面试官「'+name+'」'}));return;}
+    const exact=users.filter(u=>u.user_name===name);
+    if(exact.length>1||(!exact.length&&users.length>1)){
+      const cands=exact.length>1?exact:users;
+      console.log(JSON.stringify({status:'multiple_interviewers',message:'搜索到多个「'+name+'」，请确认是哪位',users:cands.map(u=>({user_id:u.user_id,name:u.user_name,email:u.user_email,dept:[u.dept1_name,u.dept2_name,u.dept3_name,u.dept4_name].filter(Boolean).join(' / ')}))}));return;
+    }
+    interviewers.push(exact[0]||users[0]);
+  }
+  // 新时间星期几：const dt=new Date('YYYY-MM-DD'); WD[dt.getDay()]
+  console.log(JSON.stringify({status:'ok',candidate:cand.user_name,job:cand.job_name,resume_id:cand.resume_id,interviewers:interviewers.map(u=>({user_id:u.user_id,name:u.user_name,dept:[u.dept1_name,u.dept2_name,u.dept3_name,u.dept4_name].filter(Boolean).join(' / ')}))}));
+})().catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
 " 2>/dev/null
 ```
 
-**Step 2 - 查询面试官（验证存在，获取部门）：**
-```bash
-node -e "
-const fs=require('fs'),os=require('os'),path=require('path');
-const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
-const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name+'='+c.value).join('; ');
-fetch('https://xiaozhao.leihuo.netease.com/permission/user/search?key_word=面试官姓名',{headers:{'Cookie':cookie,'Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'}})
-.then(r=>r.json()).then(d=>{
-  const users=d.data||[];
-  if(!users.length){console.log(JSON.stringify({status:'not_found'}));return;}
-  console.log(JSON.stringify({status:'ok',users:users.map(u=>({user_id:u.user_id,name:u.user_name,email:u.user_email,dept:[u.dept1_name,u.dept2_name,u.dept3_name,u.dept4_name].filter(Boolean).join(' / ')}))}));
-}).catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
+星期几直接在 JS 里算：`WD[new Date('YYYY-MM-DD').getDay()]`，无需另起进程。
 " 2>/dev/null
 ```
 
@@ -253,9 +249,21 @@ node "$SKILL_SCRIPTS/change-round-api.js" --candidate "候选人" --interviewer 
 ## 发送通知（所有功能共用）
 
 用户确认后（回复「确认」「发」「OK」「好」等）：
+
+**单个候选人：**
 ```bash
 node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
 ```
+
+**批量（同一操作安排了多个候选人）：**
+```bash
+node "$SKILL_SCRIPTS/notify-api.js" --resume_ids "{id1},{id2},{id3}" 2>/dev/null
+```
+
+批量模式下：
+- 候选人邮件/消息：逐个发送，各自独立
+- 面试官邮件：**自动按面试官聚合**，同一面试官只收一封，邮件里包含所有候选人的安排
+
 成功后告知：「✅ 通知已发出，邮件和消息均已发送」
 
 ---
@@ -298,6 +306,11 @@ bash ~/.claude/skills/leihuo-interview-mgr/update.sh
 ---
 
 ## 更新日志
+
+**v1.9（2026-04-20）**
+- 面试官通知邮件支持聚合发送：批量安排多个候选人给同一面试官时，面试官只收一封邮件（包含所有候选人安排），避免重复轰炸
+- notify-api.js 新增 `--resume_ids` 参数支持逗号分隔的批量 resume_id
+- 感谢种子用户 @曼婷 提出优化点
 
 **v1.8（2026-04-16）**
 - 新建面试改为两阶段流程：先查询候选人和面试官信息展示给用户确认，确认后才写入系统并发通知
