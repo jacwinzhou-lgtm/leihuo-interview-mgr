@@ -1,4 +1,4 @@
-# 面试改期 & 新建面试 Skill v1.9
+# 面试改期 & 新建面试 Skill v1.10
 
 你是校招面试助手，支持**面试改期**、**新建面试**、**修改面试轮次**三个功能。
 
@@ -53,10 +53,12 @@ $SKILL_SCRIPTS = "$env:APPDATA\LobsterAI\SKILLs\leihuo-interview-mgr\scripts"
 
 #### 阶段一：查询信息，与用户确认
 
-**阶段一查询（单次执行，候选人+当前面试时间一并返回）：**
+**阶段一查询脚本——执行前将顶部两个常量替换为实际姓名：**
 
 ```bash
 node -e "
+const CANDIDATE_NAME = '薛巍';   // ← 替换为实际候选人姓名
+
 const fs=require('fs'),os=require('os'),path=require('path');
 const WD=['周日','周一','周二','周三','周四','周五','周六'];
 const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
@@ -64,7 +66,7 @@ const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name
 const h={'Cookie':cookie,'Content-Type':'application/json','Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
 const BASE='https://xiaozhao.leihuo.netease.com';
 (async()=>{
-  const d=await(await fetch(BASE+'/interview/list/data',{method:'POST',headers:h,body:JSON.stringify({user_name:'候选人姓名',effective_status:[1],pageSize:10,page:1})})).json();
+  const d=await(await fetch(BASE+'/interview/list/data',{method:'POST',headers:h,body:JSON.stringify({user_name:CANDIDATE_NAME,effective_status:[1],pageSize:10,page:1})})).json();
   const list=d.data?.interview_list||[];
   if(!list.length){console.log(JSON.stringify({status:'not_found'}));return;}
   if(list.length>1){console.log(JSON.stringify({status:'multiple_candidates',candidates:list.map(c=>({name:c.user_name,job:c.job_name,resume_id:c.resume_id}))}));return;}
@@ -79,11 +81,10 @@ const BASE='https://xiaozhao.leihuo.netease.com';
 " 2>/dev/null
 ```
 
-新时间的星期几直接用 JS 算：`new Date('YYYY-MM-DD').getDay()` 映射到 `['周日','周一','周二','周三','周四','周五','周六']`，无需再起 python3 进程。
+新时间的星期几直接在 JS 里算：`WD[new Date('YYYY-MM-DD').getDay()]`，无需另起进程。
 
-**Step 3 - 向用户展示确认信息：**
+**向用户展示确认信息：**
 
-展示格式：
 ```
 请确认改期信息：
 候选人：{user_name} | {job_name}
@@ -100,13 +101,13 @@ const BASE='https://xiaozhao.leihuo.netease.com';
 #### 阶段二：用户确认后，更新时间 + 发送通知（一并执行）
 
 ```bash
-node "$SKILL_SCRIPTS/reschedule-api.js" --candidate "候选人" [--interviewer "面试官"] --time "时间" 2>/dev/null
+node "$SKILL_SCRIPTS/reschedule-api.js" --candidate "候选人姓名" [--interviewer "面试官姓名"] --time "自然语言时间" 2>/dev/null
 ```
 
 成功后**立即**执行：
 
 ```bash
-node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
+node "$SKILL_SCRIPTS/notify-api.js" --resume_id "从上一步返回的resume_id" 2>/dev/null
 ```
 
 **返回情况处理：**
@@ -128,10 +129,13 @@ node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
 
 #### 阶段一：查询信息，与用户确认（只读，不写入）
 
-**阶段一查询（单次执行，候选人+面试官并行查询）：**
+**阶段一查询脚本——执行前将顶部两个常量替换为实际姓名：**
 
 ```bash
 node -e "
+const CANDIDATE_NAME  = '李相宜';        // ← 替换为实际候选人姓名
+const INTERVIEWER_NAMES = '周家杰,张青'; // ← 替换为实际面试官姓名，多人用英文逗号分隔
+
 const fs=require('fs'),os=require('os'),path=require('path');
 const WD=['周日','周一','周二','周三','周四','周五','周六'];
 const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),'.xiaozhao-session.json')));
@@ -139,10 +143,10 @@ const cookie=s.cookies.filter(c=>c.domain.includes('netease.com')).map(c=>c.name
 const hj={'Cookie':cookie,'Content-Type':'application/json','Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
 const hg={'Cookie':cookie,'Referer':'https://xiaozhao.leihuo.netease.com/select/show','User-Agent':'Mozilla/5.0'};
 const BASE='https://xiaozhao.leihuo.netease.com';
-const interviewerNames='面试官姓名'.split(/[,，、]/).map(s=>s.trim()).filter(Boolean);
+const interviewerNames=INTERVIEWER_NAMES.split(/[,，、]/).map(s=>s.trim()).filter(Boolean);
 (async()=>{
   const [cd, ...irs]=await Promise.all([
-    fetch(BASE+'/interview/list/data',{method:'POST',headers:hj,body:JSON.stringify({user_name:'候选人姓名',effective_status:[1],pageSize:10,page:1})}).then(r=>r.json()),
+    fetch(BASE+'/interview/list/data',{method:'POST',headers:hj,body:JSON.stringify({user_name:CANDIDATE_NAME,effective_status:[1],pageSize:10,page:1})}).then(r=>r.json()),
     ...interviewerNames.map(n=>fetch(BASE+'/permission/user/search?key_word='+encodeURIComponent(n),{headers:hg}).then(r=>r.json()))
   ]);
   const list=cd.data?.interview_list||[];
@@ -161,24 +165,15 @@ const interviewerNames='面试官姓名'.split(/[,，、]/).map(s=>s.trim()).fil
     }
     interviewers.push(exact[0]||users[0]);
   }
-  // 新时间星期几：const dt=new Date('YYYY-MM-DD'); WD[dt.getDay()]
   console.log(JSON.stringify({status:'ok',candidate:cand.user_name,job:cand.job_name,resume_id:cand.resume_id,interviewers:interviewers.map(u=>({user_id:u.user_id,name:u.user_name,dept:[u.dept1_name,u.dept2_name,u.dept3_name,u.dept4_name].filter(Boolean).join(' / ')}))}));
 })().catch(e=>console.log(JSON.stringify({status:'error',msg:e.message})));
 " 2>/dev/null
 ```
 
 星期几直接在 JS 里算：`WD[new Date('YYYY-MM-DD').getDay()]`，无需另起进程。
-" 2>/dev/null
-```
 
-**Step 3 - 向用户展示确认信息：**
+**向用户展示确认信息：**
 
-> ⚠️ 日期对应星期几，必须用代码计算：
-> ```bash
-> python3 -c "import datetime; d=datetime.date(YYYY,M,D); print(d.strftime('%A'))"
-> ```
-
-展示格式：
 ```
 请确认新建面试信息：
 候选人：{user_name} | {job_name}
@@ -190,7 +185,6 @@ const interviewerNames='面试官姓名'.split(/[,，、]/).map(s=>s.trim()).fil
 ```
 
 - 如果面试官有多个同名，列出让用户选（含部门路径），等回复后再继续
-- 如果用户没说轮次，默认业务初面，不用问
 
 等待用户回复「确认」「OK」「好」「发」等。
 
@@ -199,12 +193,12 @@ const interviewerNames='面试官姓名'.split(/[,，、]/).map(s=>s.trim()).fil
 #### 阶段二：用户确认后，创建面试 + 发送通知（一并执行）
 
 ```bash
-node "$SKILL_SCRIPTS/create-interview-api.js" --candidate "候选人" --interviewer "面试官" --time "时间" [--round "1"] [--type "video"] 2>/dev/null
+node "$SKILL_SCRIPTS/create-interview-api.js" --candidate "候选人姓名" --interviewer "面试官姓名" --time "自然语言时间" [--round "1"] [--type "video"] 2>/dev/null
 ```
 
 成功后**立即**执行：
 ```bash
-node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
+node "$SKILL_SCRIPTS/notify-api.js" --resume_id "从上一步返回的resume_id" 2>/dev/null
 ```
 
 参数说明：
@@ -224,7 +218,7 @@ node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
 
 ### 流程
 ```bash
-node "$SKILL_SCRIPTS/change-round-api.js" --candidate "候选人" --interviewer "面试官" --round "3" 2>/dev/null
+node "$SKILL_SCRIPTS/change-round-api.js" --candidate "候选人姓名" --interviewer "面试官姓名" --round "3" 2>/dev/null
 ```
 
 参数说明：
@@ -252,12 +246,12 @@ node "$SKILL_SCRIPTS/change-round-api.js" --candidate "候选人" --interviewer 
 
 **单个候选人：**
 ```bash
-node "$SKILL_SCRIPTS/notify-api.js" --resume_id "{resume_id}" 2>/dev/null
+node "$SKILL_SCRIPTS/notify-api.js" --resume_id "候选人的resume_id" 2>/dev/null
 ```
 
 **批量（同一操作安排了多个候选人）：**
 ```bash
-node "$SKILL_SCRIPTS/notify-api.js" --resume_ids "{id1},{id2},{id3}" 2>/dev/null
+node "$SKILL_SCRIPTS/notify-api.js" --resume_ids "id1,id2,id3" 2>/dev/null
 ```
 
 批量模式下：
@@ -307,6 +301,11 @@ bash ~/.claude/skills/leihuo-interview-mgr/update.sh
 
 ## 更新日志
 
+**v1.10（2026-04-20）**
+- 修复内联查询脚本的占位符写法：改为顶部声明具名常量（`CANDIDATE_NAME`、`INTERVIEWER_NAMES`），避免其他 AI 将示例字符串原样执行导致"查无此人"
+- 修复 v1.8 遗留的脚本块多余闭合符号
+- 移除已废弃的 python3 星期几计算说明
+
 **v1.9（2026-04-20）**
 - 面试官通知邮件支持聚合发送：批量安排多个候选人给同一面试官时，面试官只收一封邮件（包含所有候选人安排），避免重复轰炸
 - notify-api.js 新增 `--resume_ids` 参数支持逗号分隔的批量 resume_id
@@ -327,7 +326,6 @@ bash ~/.claude/skills/leihuo-interview-mgr/update.sh
 
 **v1.5（2026-04-14）**
 - 面试改期流程重构：确认前只查询不修改，用户确认后才更新系统时间并同步发送通知
-- 新增日期星期几必须用代码计算的强制要求，禁止手写推断
 - 查询阶段新增内联 node 脚本，直接读取候选人当前面试时间
 
 **v1.4（2026-04-13）**
@@ -336,13 +334,10 @@ bash ~/.claude/skills/leihuo-interview-mgr/update.sh
 
 **v1.3（2026-04-13）**
 - 发送通知时自动补发面试官通知邮件（module_id 713），无需手动勾选模板
-- 通知流程升级为 4 步：候选人邮件 → 候选人消息 → 面试官邮件
 
 **v1.2（2026-04-13）**
 - 新增 GitHub 自动更新支持（`update.sh` / `update.bat`）
-- 安装方式改为一行命令，后续更新无需重新下载 zip
 
 **v1.1（2026-04-13）**
-- 修复 `create-interview-api.js` 新建面试时全量覆盖已有计划的 bug（现在新建前会先读取现有面试，追加后再提交）
-- 新增 `change-round-api.js`：支持修改已有面试的轮次类型（业务初面/业务终面/HR面）
-- 注意事项补充：时间参数不支持 YYYY-MM-DD 格式
+- 修复 `create-interview-api.js` 新建面试时全量覆盖已有计划的 bug
+- 新增 `change-round-api.js`：支持修改已有面试的轮次类型
